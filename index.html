@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>够不着！Unreachable</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="description" content="一个第一人称 3D 坑人小游戏：5 关，每一步都可能是陷阱。">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="够不着">
+<meta name="theme-color" content="#ffd6e7">
+<meta name="format-detection" content="telephone=no">
+<link rel="icon" href="icon.png">
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=ZCOOL+KuaiLe&display=swap">
+<style>
+/* 布局：全屏 3D 画布 + 叠加在上面的糖果风 UI 层 */
+:root {
+  --ink: #5a3a5e;
+  --ink-2: #8f6c93;
+  --pink: #ff6fa8;
+  --pink-d: #d9467f;
+  --mint: #46c9a2;
+  --mint-d: #2e9e7e;
+  --lemon: #ffd34f;
+  --lav: #a98bff;
+  --paper: #fffaf3;
+  --paper-a: rgba(255, 250, 243, 0.93);
+  --shade: rgba(90, 58, 94, 0.18);
+  --f-display: "ZCOOL KuaiLe", "Fredoka", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --f-body: "Fredoka", "ZCOOL KuaiLe", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --gut-l: max(16px, env(safe-area-inset-left, 0px));
+  --gut-r: max(16px, env(safe-area-inset-right, 0px));
+  color-scheme: light;
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #ffe3ee; color: var(--ink); font-family: var(--f-body); }
+body { position: fixed; inset: 0; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; overscroll-behavior: none; }
+[hidden] { display: none !important; }
+button { font: inherit; color: inherit; cursor: pointer; border: 0; background: none; }
+button:focus-visible { outline: 3px solid var(--lav); outline-offset: 3px; }
+
+#view { position: fixed; inset: 0; perspective: 1200px; }
+#c { width: 100%; height: 100%; display: block; transition: transform .7s cubic-bezier(.6,-0.3,.3,1.3); }
+#view.mirror #c { transform: scaleX(-1); }
+#vignette { position: fixed; inset: 0; pointer-events: none; background: radial-gradient(ellipse at center, transparent 55%, rgba(120, 40, 110, .22) 100%); }
+#flash { position: fixed; inset: 0; pointer-events: none; opacity: 0; }
+#flash.go { animation: flash .5s ease-out; }
+@keyframes flash { 0% { opacity: .85 } 100% { opacity: 0 } }
+
+/* —— 触屏 —— */
+#touch { position: fixed; inset: 0; z-index: 2; touch-action: none; }
+#joy { position: fixed; z-index: 3; width: 124px; height: 124px; margin: -62px 0 0 -62px; border-radius: 50%; pointer-events: none; opacity: 0;
+  background: radial-gradient(circle, rgba(255,255,255,.25) 0 55%, rgba(255,255,255,.45) 56% 60%, rgba(255,255,255,.15) 61%);
+  border: 3px solid rgba(255,255,255,.7); transition: opacity .15s; }
+#joy.on { opacity: 1; }
+#knob { position: absolute; left: 50%; top: 50%; width: 54px; height: 54px; margin: -27px 0 0 -27px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #fff, #ffd0e3 70%); box-shadow: 0 4px 0 #f2a5c4, 0 6px 14px rgba(90,58,94,.3); }
+#jump { position: fixed; z-index: 3; right: calc(var(--gut-r) + 18px); bottom: calc(var(--safe-b) + 26px); width: 92px; height: 92px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #fff 0, #ffb6d2 55%, #ff7fb0 100%); box-shadow: 0 7px 0 var(--pink-d), 0 12px 22px rgba(90,58,94,.35);
+  color: #fff; font: 700 22px/1 var(--f-display); text-shadow: 0 2px 0 var(--pink-d); display: grid; place-items: center; touch-action: none; }
+#jump svg { width: 30px; height: 30px; display: block; margin: 0 auto -2px; }
+#jump.down { transform: translateY(5px); box-shadow: 0 2px 0 var(--pink-d), 0 6px 12px rgba(90,58,94,.3); }
+
+/* —— HUD —— */
+#hud { position: fixed; z-index: 4; left: 0; right: 0; top: 0; padding: calc(var(--safe-t) + 10px) var(--gut-r) 0 var(--gut-l); display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; pointer-events: none; }
+.hud-r { display: flex; gap: 8px; align-items: center; }
+.pill { display: inline-flex; align-items: center; gap: 7px; padding: 7px 14px 7px 8px; border-radius: 999px; background: var(--paper-a); box-shadow: 0 3px 0 var(--shade); font-weight: 600; font-size: 15px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pill .num { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: var(--pink); color: #fff; font-size: 15px; }
+.pill svg { width: 20px; height: 20px; flex: none; }
+.pill.bump { animation: bump .45s cubic-bezier(.3,1.8,.5,1); }
+@keyframes bump { 0% { transform: scale(1) } 40% { transform: scale(1.35) rotate(-6deg); background: #ffe0ec } 100% { transform: scale(1) } }
+#hudLevelName { font-family: var(--f-display); font-weight: 400; font-size: 16px; }
+#pauseBtn { pointer-events: auto; width: 40px; height: 40px; border-radius: 50%; background: var(--paper-a); box-shadow: 0 3px 0 var(--shade); display: grid; place-items: center; }
+#pauseBtn svg { width: 18px; height: 18px; }
+#crosshair { position: fixed; z-index: 3; left: 50%; top: 50%; width: 10px; height: 10px; margin: -5px; border-radius: 50%; background: rgba(255,255,255,.95); box-shadow: 0 0 0 2px rgba(255,111,168,.65), 0 0 8px rgba(90,58,94,.35); pointer-events: none; }
+#lockHint { position: fixed; z-index: 4; left: 50%; bottom: calc(var(--safe-b) + 28px); transform: translateX(-50%); padding: 10px 18px; border-radius: 999px; background: rgba(90,58,94,.78); color: #fff; font-size: 15px; pointer-events: none; white-space: nowrap; }
+#toast { position: fixed; z-index: 6; left: 50%; top: calc(var(--safe-t) + 64px); transform: translate(-50%, -20px) scale(.8); opacity: 0; pointer-events: none;
+  padding: 12px 22px; border-radius: 20px; background: #fff; color: var(--ink); font: 400 20px/1.3 var(--f-display); box-shadow: 0 5px 0 rgba(255,111,168,.35), 0 10px 24px rgba(90,58,94,.2); max-width: calc(100vw - 40px); text-align: center; transition: all .3s cubic-bezier(.3,1.6,.5,1); }
+#toast.show { opacity: 1; transform: translate(-50%, 0) scale(1); }
+#levelCard { position: fixed; z-index: 5; left: 50%; top: 38%; transform: translate(-50%, -50%); text-align: center; pointer-events: none; opacity: 0; color: #fff; }
+#levelCard small { display: block; font: 600 16px var(--f-body); letter-spacing: .3em; text-shadow: 0 2px 0 rgba(90,58,94,.35); }
+#levelCard b { display: block; font: 400 clamp(44px, 10vmin, 84px)/1.1 var(--f-display); text-shadow: 0 4px 0 var(--pink-d), 0 8px 0 rgba(90,58,94,.25), 0 12px 30px rgba(90,58,94,.3); }
+#levelCard span { display: inline-block; margin-top: 10px; padding: 6px 16px; border-radius: 999px; background: rgba(255,255,255,.88); color: var(--ink); font-size: 15px; }
+#levelCard.show { animation: card 2.8s ease forwards; }
+@keyframes card { 0% { opacity: 0; transform: translate(-50%, -40%) scale(.7) } 12% { opacity: 1; transform: translate(-50%, -50%) scale(1.04) } 18% { transform: translate(-50%, -50%) scale(1) } 80% { opacity: 1 } 100% { opacity: 0; transform: translate(-50%, -60%) } }
+
+/* —— 通用 —— */
+.screen { position: fixed; inset: 0; z-index: 10; overflow: auto; -webkit-overflow-scrolling: touch; touch-action: pan-y; padding: calc(var(--safe-t) + 16px) var(--gut-r) calc(var(--safe-b) + 16px) var(--gut-l); }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 52px; padding: 0 26px; border-radius: 999px; background: var(--pink); color: #fff;
+  font: 400 21px/1 var(--f-display); letter-spacing: .04em; box-shadow: 0 6px 0 var(--pink-d), 0 12px 22px rgba(217,70,127,.28); transition: transform .12s, box-shadow .12s, filter .2s; text-shadow: 0 2px 0 rgba(160,40,90,.35); }
+.btn:hover { filter: brightness(1.06); transform: translateY(-2px); box-shadow: 0 8px 0 var(--pink-d), 0 14px 24px rgba(217,70,127,.3); }
+.btn:active { transform: translateY(4px); box-shadow: 0 2px 0 var(--pink-d), 0 4px 10px rgba(217,70,127,.25); }
+.btn.alt { background: #fff; color: var(--ink); text-shadow: none; box-shadow: 0 6px 0 #ecd3e4, 0 12px 22px rgba(90,58,94,.14); }
+.btn.alt:hover { box-shadow: 0 8px 0 #ecd3e4, 0 14px 24px rgba(90,58,94,.16); }
+.btn.alt:active { box-shadow: 0 2px 0 #ecd3e4; }
+.btn.mint { background: var(--mint); box-shadow: 0 6px 0 var(--mint-d), 0 12px 22px rgba(46,158,126,.28); text-shadow: 0 2px 0 rgba(20,100,80,.35); }
+.btn:disabled { filter: grayscale(.6) opacity(.65); transform: none; cursor: default; }
+.card { background: var(--paper-a); border-radius: 28px; box-shadow: 0 8px 0 rgba(255,111,168,.25), 0 20px 50px rgba(90,58,94,.22); padding: 24px; }
+h2 { font: 400 32px/1.15 var(--f-display); margin: 0 0 14px; text-wrap: balance; }
+
+/* —— 加载 / 开始 —— */
+#loading { display: grid; place-items: center; text-align: center; background: radial-gradient(ellipse at 50% 30%, rgba(255,255,255,.0), rgba(255,214,231,.35)); }
+#loading .box { display: grid; gap: 22px; justify-items: center; }
+#loadingText { font: 400 20px var(--f-display); color: var(--ink-2); }
+#loadingText::after { content: ''; display: inline-block; width: 1.2em; text-align: left; animation: dots 1.2s steps(4) infinite; }
+@keyframes dots { 0% { content: '' } 25% { content: '.' } 50% { content: '..' } 75% { content: '...' } }
+#btnTap { animation: breathe 1.6s ease-in-out infinite; }
+@keyframes breathe { 50% { transform: scale(1.06) } }
+
+/* —— 标题 —— */
+.logo { margin: 0; font: 400 clamp(52px, min(14vw, 17vh), 108px)/1 var(--f-display); color: #fff; letter-spacing: .02em; white-space: nowrap; }
+.logo span { display: inline-block; animation: hop 2.4s ease-in-out infinite; text-shadow: 0 3px 0 #ff8cbc, 0 6px 0 var(--pink-d), 0 9px 0 #b8336a, 0 16px 26px rgba(120,30,80,.35); }
+.logo span:nth-child(2) { animation-delay: .12s; color: #fff6c9; }
+.logo span:nth-child(3) { animation-delay: .24s; }
+.logo span:nth-child(4) { animation-delay: .36s; color: #ffe0ef; transform-origin: bottom; }
+@keyframes hop { 0%, 60%, 100% { transform: translateY(0) rotate(0) } 70% { transform: translateY(-14px) rotate(-6deg) } 80% { transform: translateY(0) rotate(3deg) } }
+.sub { margin: 10px 0 0; font: 600 13px var(--f-body); letter-spacing: .42em; color: #fff; text-shadow: 0 2px 0 rgba(217,70,127,.55); }
+.tag { display: inline-block; margin-top: 10px; padding: 6px 14px; border-radius: 999px; background: rgba(255,255,255,.85); font-size: 14px; color: var(--ink-2); }
+
+.side { position: absolute; display: flex; flex-direction: column; gap: 16px; }
+@media (min-aspect-ratio: 21/20) {
+  .side { left: var(--gut-l); top: calc(var(--safe-t) + 16px); bottom: calc(var(--safe-b) + 16px); width: min(430px, 46vw); justify-content: center; }
+}
+@media (max-aspect-ratio: 21/20) {
+  .side { left: var(--gut-l); right: var(--gut-r); bottom: calc(var(--safe-b) + 18px); align-items: center; text-align: center; }
+  #menu .side { top: calc(var(--safe-t) + 22px); bottom: calc(var(--safe-b) + 18px); justify-content: space-between; }
+}
+.stack { display: flex; flex-direction: column; gap: 14px; width: min(340px, 100%); }
+.stack .row { display: flex; gap: 12px; }
+.stack .row .btn { flex: 1; padding: 0 12px; }
+.menu-foot { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--ink); }
+.menu-foot .pill { box-shadow: 0 2px 0 var(--shade); }
+@media (max-height: 430px) and (min-aspect-ratio: 21/20) {
+  .side { gap: 10px; }
+  .stack { gap: 10px; }
+  .btn { min-height: 44px; font-size: 18px; }
+  .sub { margin-top: 4px; }
+  .tag { display: none; }
+}
+
+/* —— 皮肤 —— */
+#skins .panel { display: grid; gap: 14px; justify-items: center; text-align: center; width: min(380px, 100%); }
+@media (min-aspect-ratio: 21/20) { #skins .panel { justify-self: start; } }
+.skin-row { display: flex; align-items: center; gap: 12px; width: 100%; }
+.arrow { width: 52px; height: 52px; flex: none; border-radius: 50%; background: #fff; box-shadow: 0 5px 0 #ecd3e4; display: grid; place-items: center; }
+.arrow:active { transform: translateY(3px); box-shadow: 0 2px 0 #ecd3e4; }
+.arrow svg { width: 22px; height: 22px; }
+.skin-info { flex: 1; min-width: 0; }
+#skinName { font: 400 34px/1.1 var(--f-display); }
+#skinDesc { margin-top: 6px; font-size: 15px; color: var(--ink-2); min-height: 2.6em; }
+#skinLock { display: inline-flex; align-items: center; gap: 6px; margin-top: 4px; padding: 4px 12px; border-radius: 999px; background: #3f2e4a; color: #fff; font-size: 13px; }
+#skinLock svg { width: 14px; height: 14px; }
+.dots { display: flex; gap: 7px; justify-content: center; }
+.dots i { width: 9px; height: 9px; border-radius: 50%; background: rgba(90,58,94,.2); }
+.dots i.on { background: var(--pink); width: 22px; border-radius: 9px; }
+
+/* —— 选关 —— */
+#levels .panel { width: min(720px, 100%); margin: auto; }
+#levels { display: grid; place-items: center; }
+.lv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 12px; margin: 6px 0 18px; }
+.lv { position: relative; display: grid; gap: 4px; justify-items: center; padding: 16px 8px 14px; border-radius: 22px; color: #fff; text-align: center; min-width: 0; box-shadow: 0 6px 0 rgba(0,0,0,.12); transition: transform .12s; }
+.lv:hover { transform: translateY(-3px) rotate(-1deg); }
+.lv em { font: 700 38px/1 var(--f-body); font-style: normal; text-shadow: 0 3px 0 rgba(0,0,0,.15); }
+.lv b { font: 400 19px var(--f-display); }
+.lv small { font-size: 12px; opacity: .9; }
+.lv.t0 { background: linear-gradient(160deg, #ffa3c8, #ff6fa8); }
+.lv.t1 { background: linear-gradient(160deg, #7ee3c8, #2fb894); }
+.lv.t2 { background: linear-gradient(160deg, #ffd56b, #f0991c); }
+.lv.t3 { background: linear-gradient(160deg, #9b84f0, #5b45a0); }
+.lv.t4 { background: linear-gradient(160deg, #ffb08f, #ff6f9c); }
+.lv.locked { filter: grayscale(.85) opacity(.55); cursor: default; }
+.lv.locked:hover { transform: none; }
+.panel-foot { display: flex; justify-content: center; }
+
+/* —— 说明 —— */
+#help { display: grid; place-items: center; }
+#help .card { width: min(680px, 100%); }
+.keys { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-bottom: 16px; }
+.keys section { background: #fff; border-radius: 18px; padding: 14px 16px; }
+.keys h3 { margin: 0 0 8px; font: 400 19px var(--f-display); color: var(--pink-d); }
+.keys p { margin: 6px 0; font-size: 15px; line-height: 1.5; }
+kbd { display: inline-block; min-width: 26px; padding: 2px 7px; border-radius: 7px; background: #f6eef6; box-shadow: 0 2px 0 #e2cfe0; font: 600 13px var(--f-body); text-align: center; }
+.opts { display: grid; gap: 12px; background: #fff; border-radius: 18px; padding: 14px 16px; margin-bottom: 16px; }
+.opt { display: flex; align-items: center; justify-content: space-between; gap: 14px; font-size: 16px; }
+.opt input[type=range] { flex: 1; max-width: 220px; accent-color: var(--pink); }
+.switch { position: relative; width: 52px; height: 30px; flex: none; }
+.switch input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.switch span { position: absolute; inset: 0; border-radius: 99px; background: #e8d8e6; transition: background .2s; pointer-events: none; }
+.switch span::after { content: ''; position: absolute; left: 3px; top: 3px; width: 24px; height: 24px; border-radius: 50%; background: #fff; box-shadow: 0 2px 4px rgba(90,58,94,.25); transition: transform .2s; }
+.switch input:checked + span { background: var(--mint); }
+.switch input:checked + span::after { transform: translateX(22px); }
+.switch input:focus-visible + span { outline: 3px solid var(--lav); outline-offset: 2px; }
+.help-foot { display: flex; gap: 12px; justify-content: space-between; flex-wrap: wrap; }
+.note { font-size: 13px; color: var(--ink-2); margin: 0 0 14px; line-height: 1.6; }
+
+/* —— 暂停 —— */
+#pause { display: grid; place-items: center; background: rgba(90,58,94,.35); }
+#pause .card { display: grid; gap: 14px; width: min(320px, 100%); text-align: center; }
+
+/* —— 阵亡 —— */
+#death { display: grid; place-items: center; background: radial-gradient(ellipse at center, rgba(70,30,80,.25), rgba(70,30,80,.6)); text-align: center; transition: background .8s; }
+#death .wrap { display: grid; gap: 14px; justify-items: center; animation: pop .45s cubic-bezier(.3,1.7,.5,1); }
+@keyframes pop { 0% { transform: scale(.5); opacity: 0 } 100% { transform: scale(1); opacity: 1 } }
+#deathTitle { font: 400 clamp(60px, 14vmin, 110px)/1 var(--f-display); color: #fff; text-shadow: 0 4px 0 #ff8cbc, 0 8px 0 var(--pink-d), 0 14px 30px rgba(60,10,50,.5); animation: wob 1.2s ease-in-out infinite; }
+@keyframes wob { 0%, 100% { transform: rotate(-3deg) } 50% { transform: rotate(3deg) scale(1.04) } }
+#deathMsg { max-width: min(520px, 100%); padding: 14px 22px; border-radius: 22px; background: #fff; font: 400 21px/1.4 var(--f-display); box-shadow: 0 6px 0 rgba(255,111,168,.35); position: relative; }
+#deathMsg::before { content: ''; position: absolute; top: -10px; left: 50%; margin-left: -10px; border: 10px solid transparent; border-top: 0; border-bottom-color: #fff; }
+.death-stats { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+.death-hint { font-size: 14px; color: #fff; opacity: .9; text-shadow: 0 1px 2px rgba(60,10,50,.5); }
+#deathHint2 { font: 400 18px var(--f-display); color: #fff; padding: 8px 16px; border-radius: 999px; background: rgba(255,111,168,.85); animation: wob 1s ease-in-out infinite; }
+.passthrough { pointer-events: none; }
+.passthrough .btn { pointer-events: auto; }
+#death.passthrough { background: radial-gradient(ellipse at center, rgba(70,30,80,.06), rgba(70,30,80,.28)); }
+
+/* —— 过关 —— */
+#clear { display: grid; place-items: end center; background: linear-gradient(180deg, rgba(255,255,255,0) 40%, rgba(255,180,210,.4)); }
+@media (min-aspect-ratio: 21/20) { #clear { place-items: center start; background: linear-gradient(90deg, rgba(255,180,210,.4), rgba(255,255,255,0) 60%); } }
+#clear .card { width: min(380px, 100%); text-align: center; display: grid; gap: 12px; animation: pop .5s cubic-bezier(.3,1.7,.5,1); }
+.stars { display: flex; justify-content: center; gap: 6px; }
+.stars i { width: 46px; height: 46px; background: #eadbe8; clip-path: polygon(50% 0, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%); }
+.stars i:nth-child(2) { transform: translateY(-8px) scale(1.15); }
+.stars i.on { background: linear-gradient(160deg, #fff3a0, #ffc93c 60%, #ff9f1c); animation: star .6s cubic-bezier(.3,1.8,.5,1) backwards; }
+.stars i.on:nth-child(2) { animation-delay: .15s; } .stars i.on:nth-child(3) { animation-delay: .3s; }
+@keyframes star { 0% { transform: scale(0) rotate(-90deg) } }
+.stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.stats div { background: #fff; border-radius: 16px; padding: 10px; }
+.stats small { display: block; font-size: 13px; color: var(--ink-2); }
+.stats b { font: 700 26px var(--f-body); font-variant-numeric: tabular-nums; }
+#clearComment { margin: 0; color: var(--ink-2); font-size: 15px; }
+.btn-row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+#clear.crack .card { animation: crackfall .65s cubic-bezier(.5,0,.8,.4) forwards; }
+#clear.crack .card::after { content: ''; position: absolute; inset: 0; border-radius: inherit; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' preserveAspectRatio='none'%3E%3Cpath d='M48 0 L55 18 L44 30 L58 46 L41 61 L56 77 L47 100' stroke='%235a3a5e' stroke-width='1.6' fill='none'/%3E%3Cpath d='M44 30 L20 38 M58 46 L84 40 M41 61 L14 70' stroke='%235a3a5e' stroke-width='1' fill='none'/%3E%3C/svg%3E") center / 100% 100%; }
+#clear .card { position: relative; }
+@keyframes crackfall { 0% { transform: none } 25% { transform: rotate(-4deg) scale(1.03) } 100% { transform: translateY(110vh) rotate(24deg); opacity: .6 } }
+
+/* —— 结局 —— */
+#ending { display: grid; place-items: center; background: radial-gradient(ellipse at center, rgba(255,255,255,.1), rgba(255,170,200,.45)); }
+#ending .card { width: min(560px, 100%); text-align: center; display: grid; gap: 14px; }
+#ending .logo { font-size: clamp(44px, 11vmin, 76px); }
+.rank { display: inline-block; justify-self: center; padding: 8px 18px; border-radius: 999px; background: linear-gradient(90deg, #ffb3d0, #c9b2ff); color: #fff; font: 400 20px var(--f-display); text-shadow: 0 2px 0 rgba(120,40,100,.3); }
+.report { text-align: left; background: #fff; border-radius: 18px; padding: 14px 16px; }
+.report h3 { margin: 0 0 4px; font: 400 19px var(--f-display); }
+.report p { margin: 0 0 10px; font-size: 13px; color: var(--ink-2); }
+.report ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.report li { display: grid; grid-template-columns: minmax(0, 9.5em) 1fr 2.2em; align-items: center; gap: 10px; font-size: 14px; }
+.report li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.report li i { height: 12px; border-radius: 6px; background: #f6e8f2; position: relative; overflow: hidden; }
+.report li i::after { content: ''; position: absolute; inset: 0; width: var(--w); border-radius: 6px; background: linear-gradient(90deg, #ff9fc6, #ff6fa8); }
+.report li b { text-align: right; font-variant-numeric: tabular-nums; }
+.report li.empty { display: block; color: var(--ink-2); }
+#endFake { font-size: 13px; color: var(--ink-2); margin: -4px 0 0; }
+#btnAgain { transition: transform .25s cubic-bezier(.3,1.6,.5,1); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}
+</style>
+</head>
+<body>
+<div id="view"><canvas id="c"></canvas></div>
+<div id="vignette"></div>
+<div id="flash"></div>
+<div id="touch" hidden></div>
+<div id="joy"><div id="knob"></div></div>
+<button id="jump" hidden aria-label="跳跃"><span><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 14l6-6 6 6"/></svg>跳</span></button>
+
+<div id="hud" hidden>
+  <div class="pill"><span class="num" id="hudLevelNum">1</span><span id="hudLevelName">欢迎光临</span></div>
+  <div class="hud-r">
+    <div class="pill" id="hudDeathPill" title="累计阵亡"><svg viewBox="0 0 24 24"><path fill="#5a3a5e" d="M12 2C6.9 2 3 5.7 3 10.5c0 2.9 1.4 5 3.5 6.3V19a2 2 0 0 0 2 2h7a2 2 0 0 0 2-2v-2.2c2.1-1.3 3.5-3.4 3.5-6.3C21 5.7 17.1 2 12 2z"/><circle cx="8.6" cy="11" r="2.2" fill="#fff"/><circle cx="15.4" cy="11" r="2.2" fill="#fff"/><path d="M11 15.5h2l-1 1.6z" fill="#fff"/></svg><span id="hudDeaths">0</span></div>
+    <div class="pill" title="本关用时"><svg viewBox="0 0 24 24" fill="none" stroke="#5a3a5e" stroke-width="2.4" stroke-linecap="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2M9 2.5h6"/></svg><span id="hudTime">0:00</span></div>
+    <button id="pauseBtn" aria-label="暂停"><svg viewBox="0 0 24 24" fill="#5a3a5e"><rect x="5" y="4" width="5" height="16" rx="2"/><rect x="14" y="4" width="5" height="16" rx="2"/></svg></button>
+  </div>
+</div>
+<div id="crosshair" hidden></div>
+<div id="lockHint" hidden>点击画面，用鼠标转动视角</div>
+<div id="toast" role="status"></div>
+<div id="levelCard"></div>
+
+<section id="loading" class="screen">
+  <div class="box">
+    <h1 class="logo"><span>够</span><span>不</span><span>着</span><span>！</span></h1>
+    <p class="sub">UNREACHABLE</p>
+    <div id="loadingText">正在铺设陷阱</div>
+    <button id="btnTap" class="btn" hidden>点我开始</button>
+  </div>
+</section>
+
+<section id="menu" class="screen" hidden>
+  <div class="side">
+    <div>
+      <h1 class="logo"><span>够</span><span>不</span><span>着</span><span>！</span></h1>
+      <p class="sub">UNREACHABLE</p>
+      <span class="tag">第一人称坑人小游戏 · 5 关 · 每一步都可能是陷阱</span>
+    </div>
+    <div class="stack">
+      <button id="btnPlay" class="btn">开始游戏</button>
+      <div class="row">
+        <button id="btnLevels" class="btn alt">选关</button>
+        <button id="btnSkins" class="btn alt">换皮肤</button>
+      </div>
+      <button id="btnHelp" class="btn alt">玩法与设置</button>
+      <div class="menu-foot"><span class="pill"><svg viewBox="0 0 24 24"><path fill="#5a3a5e" d="M12 2C6.9 2 3 5.7 3 10.5c0 2.9 1.4 5 3.5 6.3V19a2 2 0 0 0 2 2h7a2 2 0 0 0 2-2v-2.2c2.1-1.3 3.5-3.4 3.5-6.3C21 5.7 17.1 2 12 2z"/><circle cx="8.6" cy="11" r="2.2" fill="#fff"/><circle cx="15.4" cy="11" r="2.2" fill="#fff"/></svg>累计阵亡 <b id="menuDeaths">0</b> 次</span></div>
+    </div>
+  </div>
+</section>
+
+<section id="skins" class="screen" hidden>
+  <div class="side">
+    <div class="panel card">
+      <div class="skin-row">
+        <button class="arrow" id="skinPrev" aria-label="上一个"><svg viewBox="0 0 24 24" fill="none" stroke="#5a3a5e" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button>
+        <div class="skin-info">
+          <div id="skinName">团子猫</div>
+          <div id="skinLock" hidden><svg viewBox="0 0 24 24" fill="#fff"><path d="M7 10V8a5 5 0 0 1 10 0v2h1a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1zm2 0h6V8a3 3 0 0 0-6 0z"/></svg>未解锁</div>
+          <div id="skinDesc"></div>
+        </div>
+        <button class="arrow" id="skinNext" aria-label="下一个"><svg viewBox="0 0 24 24" fill="none" stroke="#5a3a5e" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg></button>
+      </div>
+      <div class="dots" id="skinDots"></div>
+      <div class="btn-row">
+        <button class="btn alt" data-back>返回</button>
+        <button class="btn mint" id="skinPick">就它了！</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="levels" class="screen" hidden>
+  <div class="panel card">
+    <h2>选择关卡</h2>
+    <div class="lv-grid" id="levelList"></div>
+    <div class="panel-foot"><button class="btn alt" data-back>返回</button></div>
+  </div>
+</section>
+
+<section id="help" class="screen" hidden>
+  <div class="card">
+    <h2>怎么玩</h2>
+    <p class="note">走到每一关的终点传送门就算过关。听起来很简单？这里的地板、路牌、金币、颜色、按钮，甚至死亡画面，都可能在骗你。死了就再来，记住它们的坏心眼。</p>
+    <div class="keys">
+      <section>
+        <h3>键盘 + 鼠标</h3>
+        <p><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 移动　<kbd>空格</kbd> 跳</p>
+        <p>鼠标 转视角（点画面锁定）</p>
+        <p><kbd>←</kbd><kbd>→</kbd> 也能转身　<kbd>R</kbd> 重来　<kbd>Esc</kbd> 暂停</p>
+      </section>
+      <section>
+        <h3>手机 / iPad 触屏</h3>
+        <p>左半边屏幕：按住拖动 = 摇杆移动</p>
+        <p>右半边屏幕：滑动 = 转视角</p>
+        <p>右下角大按钮 = 跳</p>
+      </section>
+    </div>
+    <div class="opts">
+      <label class="opt"><span>音效</span><span class="switch"><input type="checkbox" id="optSfx"><span></span></span></label>
+      <label class="opt"><span>音乐</span><span class="switch"><input type="checkbox" id="optMusic"><span></span></span></label>
+      <label class="opt"><span>视角灵敏度</span><input type="range" id="optSens" min="0.4" max="2.2" step="0.1"></label>
+    </div>
+    <div class="help-foot">
+      <button class="btn alt" id="btnReset">清空存档</button>
+      <button class="btn" data-back>知道啦</button>
+    </div>
+  </div>
+</section>
+
+<section id="pause" class="screen" hidden>
+  <div class="card">
+    <h2>休息一下～</h2>
+    <button class="btn" id="btnResume">继续</button>
+    <button class="btn alt" id="btnRestart">从头再来</button>
+    <button class="btn alt" id="btnMenu">回到主页</button>
+  </div>
+</section>
+
+<section id="death" class="screen" hidden>
+  <div class="wrap">
+    <div id="deathTitle">啊呜！</div>
+    <div id="deathMsg"></div>
+    <div class="death-stats">
+      <span class="pill">累计阵亡 <b id="deathCount">0</b></span>
+      <span class="pill">本关 <b id="deathLevelCount">0</b></span>
+    </div>
+    <button class="btn" id="btnRetry">再来一次</button>
+    <div class="death-hint">按 空格 / 轻触屏幕 重来</div>
+    <div id="deathHint2" hidden>……咦？你怎么还能动？</div>
+  </div>
+</section>
+
+<section id="clear" class="screen" hidden>
+  <div class="card">
+    <div class="stars" id="clearStars"></div>
+    <h2 id="clearTitle">第 1 关 通过！</h2>
+    <div class="stats">
+      <div><small>用时</small><b id="clearTime">0:00</b></div>
+      <div><small>本关阵亡</small><b id="clearDeaths">0</b></div>
+    </div>
+    <p id="clearComment"></p>
+    <div class="btn-row">
+      <button class="btn alt" id="btnClearMenu">主页</button>
+      <button class="btn" id="btnNext">下一关 →</button>
+    </div>
+  </div>
+</section>
+
+<section id="ending" class="screen" hidden>
+  <div class="card">
+    <h1 class="logo"><span>够</span><span>着</span><span>了</span><span>！</span></h1>
+    <span class="rank" id="endRank">人间清醒</span>
+    <div class="stats">
+      <div><small>累计阵亡</small><b id="endDeaths">0</b></div>
+      <div><small>本次用时</small><b id="endTime">0:00</b></div>
+    </div>
+    <p id="endFake" hidden>（其中有 1 次阵亡是假的，你懂的）</p>
+    <div class="report">
+      <h3>思维定势报告</h3>
+      <p>这些「常识」让你吃了最多苦头：</p>
+      <ul id="endSets"></ul>
+    </div>
+    <p class="note">已解锁皮肤「金团子」✦ 去换上它炫耀一下吧</p>
+    <div class="btn-row">
+      <button class="btn alt" id="btnEndMenu">回到主页</button>
+      <button class="btn" id="btnAgain">再玩一次</button>
+    </div>
+  </div>
+</section>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
