@@ -154,6 +154,54 @@ function coinTexture() {
   return t;
 }
 
+const crackCache = new Map();
+function crackedMat(color) {
+  if (crackCache.has(color)) return crackCache.get(color);
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = 128;
+  const x = cv.getContext('2d');
+  x.fillStyle = '#ffffff'; x.fillRect(0, 0, 128, 128);
+  x.strokeStyle = 'rgba(60,30,80,0.75)'; x.lineWidth = 3; x.lineJoin = 'round';
+  const crack = (pts) => { x.beginPath(); pts.forEach(([a, b], i) => (i ? x.lineTo(a, b) : x.moveTo(a, b))); x.stroke(); };
+  crack([[10, 30], [40, 48], [58, 40], [70, 66], [100, 72], [120, 100]]);
+  crack([[58, 40], [64, 12]]); crack([[70, 66], [52, 96], [60, 122]]); crack([[100, 72], [118, 50]]);
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  const m = new THREE.MeshStandardMaterial({ color, map: t, roughness: 0.6, vertexColors: true });
+  m.userData.cached = true;
+  crackCache.set(color, m);
+  return m;
+}
+
+function crateTexture(card) {
+  const key = 'crate' + card;
+  if (texCache.has(key)) return texCache.get(key);
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = 256;
+  const x = cv.getContext('2d');
+  if (card) {
+    x.fillStyle = '#d9b48a'; x.fillRect(0, 0, 256, 256);
+    x.fillStyle = '#c99f72'; for (let i = 0; i < 256; i += 9) x.fillRect(0, i, 256, 2);
+    x.fillStyle = '#f2e3c4'; x.fillRect(0, 108, 256, 40);
+    x.save(); x.translate(128, 200); x.rotate(-0.08);
+    x.fillStyle = '#e0414f'; x.font = `700 34px ${FONT}`; x.textAlign = 'center'; x.fillText('易碎 FRAGILE', 0, 0);
+    x.restore();
+    x.font = `600 40px ${FONT}`; x.fillStyle = '#7a5a3a'; x.textAlign = 'center'; x.fillText('↑↑', 128, 70);
+  } else {
+    x.fillStyle = '#f2c48d'; x.fillRect(0, 0, 256, 256);
+    x.fillStyle = '#e8b276'; for (let i = 0; i < 256; i += 64) x.fillRect(0, i + 30, 256, 4);
+    x.strokeStyle = '#c98a4f'; x.lineWidth = 22; x.strokeRect(11, 11, 234, 234);
+    x.beginPath(); x.moveTo(22, 22); x.lineTo(234, 234); x.stroke();
+    x.fillStyle = '#ff7fa8'; x.beginPath();
+    x.arc(110, 110, 22, 0, Math.PI * 2); x.arc(146, 110, 22, 0, Math.PI * 2); x.fill();
+    x.beginPath(); x.moveTo(90, 120); x.lineTo(128, 160); x.lineTo(166, 120); x.fill();
+  }
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  texCache.set(key, t);
+  return t;
+}
+
 function chevronTexture(dir) {
   const key = 'chev' + dir;
   if (texCache.has(key)) return texCache.get(key);
@@ -230,6 +278,8 @@ export class Level {
     this.spawnYaw = 0;
     this.goals = [];
     this._v = new THREE.Vector3();
+    this.attempt = game.levelDeaths || 0; // 本关第几次尝试（死过几次）
+    this.memory = game.memory || new Set(); // 本关里玩家已经见识过的陷阱
   }
 
   get p() { return this.g.player; }
@@ -248,7 +298,7 @@ export class Level {
       solid: o.solid !== false, kill: o.kill || null, enabled: true,
       prev: new THREE.Vector3(), min: new THREE.Vector3(), max: new THREE.Vector3(),
       onStep: o.onStep || null, onStand: o.onStand || null,
-      conveyor: o.conveyor || null, jumpMul: o.jumpMul || 1, speedMul: o.speedMul || 1, crush: !!o.crush,
+      conveyor: o.conveyor || null, jumpMul: o.jumpMul || 1, speedMul: o.speedMul || 1, crush: !!o.crush, pushable: !!o.pushable,
     };
     if (obj && !obj.parent) this.root.add(obj);
     this.ents.push(e);
@@ -295,10 +345,10 @@ export class Level {
   }
 
   // 让某个实体掉下去
-  drop(e, { delay = 0, wobble = 0.12, dist = 40, dur = 1.5, sound = true, rotate = true } = {}) {
+  drop(e, { delay = 0, wobble = 0.12, dist = 40, dur = 1.5, sound = true, rotate = true, back = 0 } = {}) {
     if (!e || e.dropping) return;
     e.dropping = true;
-    const o = e.obj, bx = o.position.x;
+    const o = e.obj, bx = o.position.x, by = o.position.y;
     if (wobble > 0) {
       const start = this.time;
       this.every(() => {
@@ -309,9 +359,39 @@ export class Level {
     }
     this.after(wobble + delay, () => {
       if (sound) this.sfx.rumble();
-      this.tween(o.position, { y: o.position.y - dist }, dur, 'inQuad', { done: () => { e.enabled = false; o.visible = false; } });
+      this.tween(o.position, { y: o.position.y - dist }, dur, 'inQuad', {
+        done: () => {
+          e.enabled = false; o.visible = false;
+          if (!back) return;
+          // 过一会儿再长回来（不然回程就没路了）
+          this.after(back, () => {
+            o.position.set(bx, by - 8, o.position.z); o.rotation.set(0, 0, 0); o.visible = true;
+            this.tween(o.position, { y: by }, 0.7, 'outBack', { done: () => { e.enabled = true; e.dropping = false; } });
+          });
+        },
+      });
       if (rotate) this.tween(o.rotation, { x: (Math.random() - 0.5) * 0.8, z: (Math.random() - 0.5) * 0.8 }, dur, 'inQuad');
     });
+  }
+
+  // 站在上面超过 t 秒就会塌（走过去没事，停下来就完蛋）
+  fragile(e, t, o = {}) {
+    let s = 0;
+    if (o.cracked) e.obj.material = crackedMat(o.color || this.theme.tileB);
+    this.every((dt) => {
+      if (e.dropping || !e.enabled) return false;
+      if (this.p.groundEnt === e && this.g.canInteract()) {
+        s += dt;
+        if (s > t) {
+          this.mark(o.id);
+          o.msg && this.fallMsg(o.msg, o.set);
+          this.sfx.crack();
+          this.drop(e, { wobble: 0.15, dur: 1.2, back: o.back || 0 });
+          return false;
+        }
+      } else s = Math.max(0, s - dt * 2);
+    });
+    return e;
   }
 
   // —— 尖刺 ——
@@ -498,7 +578,7 @@ export class Level {
     g.position.set(x, y, z);
     const base = new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.85, 0.22, 32), mat('#f4f0ff', { vertexColors: false, metalness: 0.2, roughness: 0.4 }));
     base.position.y = 0.11; base.castShadow = true; base.receiveShadow = true;
-    const dome = new THREE.Mesh(new THREE.SphereGeometry(0.55, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: '#ff3d6e', roughness: 0.18, emissive: '#ff1f50', emissiveIntensity: 0.25 }));
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(0.55, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: o.color || '#ff3d6e', roughness: 0.18, emissive: o.color || '#ff1f50', emissiveIntensity: 0.25 }));
     dome.position.y = 0.2; dome.castShadow = true;
     dome.scale.y = 0.7;
     g.add(base, dome);
@@ -641,6 +721,205 @@ export class Level {
     const ph = Math.random() * 6;
     this.every((dt, t) => { g.position.y = y + Math.sin(t * 0.8 + ph) * 0.15; });
     return g;
+  }
+
+  // —— 关卡记忆（Level Devil 式：你学会了躲，它就学会了在你躲的地方等你）——
+  seen(id) { return this.memory.has(id); }
+  mark(id) { if (id) this.memory.add(id); }
+
+  // 尝试把实体沿某轴挪动（推箱子 / 箱子下落），被别的实心物体挡住就放弃
+  tryMoveEnt(e, axis, d) {
+    const old = e.obj.position[axis];
+    e.obj.position[axis] += d;
+    this.updateBox(e);
+    const t = 1e-3;
+    for (const o of this.ents) {
+      if (o === e || !o.enabled || !o.solid) continue;
+      if (e.min.x < o.max.x - t && e.max.x > o.min.x + t && e.min.y < o.max.y - t && e.max.y > o.min.y + t && e.min.z < o.max.z - t && e.max.z > o.min.z + t) {
+        e.obj.position[axis] = old; this.updateBox(e); return false;
+      }
+    }
+    return true;
+  }
+
+  // —— 可以推的木箱（掉下去会自己回到原位）；cardboard = 一踩就扁的纸箱 ——
+  crate(x, z, o = {}) {
+    const s = o.size ?? 1.3, y = o.y ?? 0;
+    const m = new THREE.Mesh(rbox(s, s, s, 0.08), new THREE.MeshStandardMaterial({ map: crateTexture(!!o.cardboard), roughness: 0.75, vertexColors: true }));
+    m.position.set(x, y + s / 2, z);
+    m.castShadow = true; m.receiveShadow = true;
+    m.userData.ownMat = true;
+    const e = this.ent(m, s / 2, s / 2, s / 2, { pushable: !o.cardboard });
+    e.home = m.position.clone(); e.vy = 0; e.isCrate = true;
+    if (o.cardboard) {
+      e.onStep = () => {
+        if (e.squashed) return;
+        e.squashed = true;
+        this.sfx.squish(); this.sfx.crack();
+        this.mark(o.id);
+        o.onSquash && o.onSquash();
+        this.tween(m.scale, { y: 0.12, x: 1.25, z: 1.25 }, 0.18, 'outQuad', { done: () => { e.enabled = false; } });
+        this.tween(m.position, { y: y + s * 0.06 }, 0.18, 'outQuad');
+      };
+      return e;
+    }
+    this.every((dt) => {
+      if (!e.enabled) return;
+      e.vy = Math.max(-30, e.vy - 22 * dt);
+      if (!this.tryMoveEnt(e, 'y', e.vy * dt)) e.vy = 0;
+      if (m.position.y < this.killY - 3) {
+        m.position.copy(e.home); e.vy = 0; this.updateBox(e);
+        this.g.fx.emit(e.home, { count: 20, speed: 3, colors: ['#ffffff', '#ffe3a8'] });
+        this.sfx.pop();
+        this.toast(o.backMsg || '箱子自己爬回来了');
+      }
+    });
+    return e;
+  }
+
+  // —— 压力板：玩家或箱子压着就算按下 ——
+  plate(x, z, o = {}) {
+    const y = o.y ?? 0;
+    const base = new THREE.Mesh(rbox(1.8, 0.12, 1.8, 0.05), mat('#8b7fa8'));
+    base.position.set(x, y + 0.02, z);
+    const top = new THREE.Mesh(rbox(1.5, 0.14, 1.5, 0.06), mat(o.color || '#ffd34f', { emissive: '#ff9a00', emissiveIntensity: 0.2 }));
+    top.position.set(x, y + 0.1, z);
+    base.receiveShadow = top.receiveShadow = true;
+    this.root.add(base, top);
+    const api = { down: false };
+    const zmin = new THREE.Vector3(x - 0.85, y - 0.1, z - 0.85), zmax = new THREE.Vector3(x + 0.85, y + 0.6, z + 0.85);
+    const hit = (a, b) => a.x < zmax.x && b.x > zmin.x && a.y < zmax.y && b.y > zmin.y && a.z < zmax.z && b.z > zmin.z;
+    this.every(() => {
+      const p = this.p.pos;
+      let on = hit({ x: p.x - 0.3, y: p.y, z: p.z - 0.3 }, { x: p.x + 0.3, y: p.y + 0.5, z: p.z + 0.3 }) && this.g.canInteract();
+      if (!on) for (const e of this.ents) if (e.isCrate && e.enabled && hit(e.min, e.max)) { on = true; break; }
+      if (on !== api.down) {
+        api.down = on;
+        top.position.y = y + (on ? 0.03 : 0.1);
+        this.sfx.click();
+        on ? o.on && o.on() : o.off && o.off();
+      }
+    });
+    return api;
+  }
+
+  // —— 隐藏砖块：你往上跳时才突然出现，把你顶回坑里 ——
+  bonkBlock(x, y, z, o = {}) {
+    const m = new THREE.Mesh(rbox(1.4, 1.0, 1.4, 0.14), mat('#ffd34f', { emissive: '#ffb000', emissiveIntensity: 0.25 }));
+    m.position.set(x, y + 0.5, z);
+    m.visible = false; m.castShadow = true;
+    const e = this.ent(m, 0.7, 0.5, 0.7);
+    e.enabled = false;
+    this.every(() => {
+      const P = this.p, p = P.pos;
+      if (!this.g.canInteract()) return;
+      if (!P.grounded && P.vel.y > 0 && Math.abs(p.x - x) < 0.95 && Math.abs(p.z - z) < 0.95 && p.y + 1.62 < y - 0.02 && p.y + 1.62 > y - 1.4) {
+        e.enabled = true; m.visible = true;
+        m.scale.setScalar(0.3);
+        this.tween(m.scale, { x: 1, y: 1, z: 1 }, 0.15, 'outBack');
+        this.sfx.bonk();
+        this.mark(o.id);
+        o.msg && this.fallMsg(o.msg, o.set);
+        return false;
+      }
+    });
+    return e;
+  }
+
+  // —— 天降方块：被踩中会把你压扁。auto: 按节奏一直砸（地上的影子会提前变深） ——
+  crusher(x, z, w, d, o = {}) {
+    const y0 = o.y ?? 0, h = o.h ?? 1.8, up = y0 + (o.top ?? 5.5) + h / 2, downY = y0 + h / 2;
+    const m = new THREE.Mesh(rbox(w, h, d, 0.16), mat(o.color || '#b9a3f0'));
+    m.position.set(x, up, z);
+    m.castShadow = true;
+    const e = this.ent(m, w / 2 - 0.02, h / 2, d / 2 - 0.02, { crush: true, kill: { msg: o.msg || '被压成了一张饼 (＞﹏＜)', set: o.set, type: 'squash' } });
+    // 地面影子：快砸下来时变深，给你一点反应时间
+    const sh = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshBasicMaterial({ color: '#3a1d48', transparent: true, opacity: 0, depthWrite: false }));
+    sh.rotation.x = -Math.PI / 2; sh.position.set(x, y0 + 0.02, z);
+    this.root.add(sh);
+    const api = { e, busy: false };
+    api.drop = (cb) => {
+      if (api.busy) return;
+      api.busy = true;
+      this.mark(o.id);
+      this.tween(sh.material, { opacity: 0.45 }, o.warn ?? 0.35, 'linear');
+      this.tween(m.position, { y: downY }, 0.13, 'inQuad', {
+        delay: o.warn ?? 0.35,
+        done: () => {
+          this.sfx.bonk(); this.g.shake(0.35);
+          if (o.stay) { api.busy = false; cb && cb(); return; }
+          this.tween(m.position, { y: up }, 0.9, 'inOutSine', { delay: o.hold ?? 0.5, done: () => { api.busy = false; cb && cb(); } });
+          this.tween(sh.material, { opacity: 0 }, 0.6, 'linear', { delay: o.hold ?? 0.5 });
+        },
+      });
+    };
+    if (o.zone) this.zone(o.zone[0], y0 + 1, o.zone[1], o.zone[2], 3, o.zone[3], { once: !o.repeat, enter: () => api.drop() });
+    if (o.auto) {
+      const loop = () => this.after(o.auto, () => api.drop(loop));
+      this.after(o.phase ?? 0, () => api.drop(loop));
+    }
+    return api;
+  }
+
+  // —— 拳击手套：从箱子里弹出来把你打飞 ——
+  glove(x, y, z, dir, o = {}) {
+    const g = new THREE.Group();
+    g.position.set(x, y, z);
+    g.rotation.y = Math.atan2(dir[0], dir[1]);
+    const box = new THREE.Mesh(rbox(1.0, 1.0, 0.8, 0.12), mat(o.color || '#ffd34f'));
+    box.castShadow = true;
+    const spring = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 1, 10), mat('#c9c1dd', { vertexColors: false, metalness: 0.5, roughness: 0.3 }));
+    spring.rotation.x = Math.PI / 2;
+    const fist = new THREE.Group();
+    const ball = new THREE.Mesh(shared.sphere, new THREE.MeshStandardMaterial({ color: '#ff4d6d', roughness: 0.3 }));
+    ball.scale.set(0.45, 0.4, 0.42);
+    const thumb = new THREE.Mesh(shared.sphere, ball.material);
+    thumb.scale.setScalar(0.17); thumb.position.set(0.32, 0.12, -0.05);
+    fist.add(ball, thumb);
+    fist.position.z = 0.3;
+    g.add(box, spring, fist);
+    const bang = labelSprite('!', { color: '#ff3d6e', size: 0.7 });
+    bang.position.y = 1.1; bang.visible = false;
+    g.add(bang);
+    this.root.add(g);
+    const reach = o.reach ?? 3.2, power = o.power ?? 13;
+    const api = { fired: false };
+    let ext = 0;
+    const setExt = (v) => { ext = v; fist.position.z = 0.3 + v; spring.scale.y = Math.max(0.01, v); spring.position.z = 0.3 + v / 2; };
+    setExt(0.001);
+    api.fire = () => {
+      if (api.fired) return;
+      api.fired = true;
+      this.mark(o.id);
+      bang.visible = true;
+      this.sfx.alarm();
+      const s = { v: 0.001 };
+      let hitDone = false;
+      this.tween(s, { v: reach }, 0.12, 'outQuad', {
+        delay: o.delay ?? 0.3,
+        update: () => {
+          setExt(s.v);
+          if (hitDone || !this.g.canInteract()) return;
+          // 拳头扫过的区域
+          const p = this.p.pos;
+          const rx = p.x - x, rz = p.z - z;
+          const along = rx * dir[0] + rz * dir[1], side = Math.abs(rx * dir[1] - rz * dir[0]);
+          if (along > 0 && along < s.v + 0.9 && side < 1.0 && p.y < y + 0.35 && p.y + 1.62 > y - 0.5) {
+            hitDone = true;
+            this.sfx.bonk(); this.g.shake(0.5);
+            this.g.impulse(dir[0] * power, 5.5, dir[1] * power);
+            o.msg && this.fallMsg(o.msg, o.set);
+          }
+        },
+        done: () => {
+          this.sfx.boing();
+          bang.visible = false;
+          this.after(0.6, () => this.tween(s, { v: 0.001 }, 0.4, 'inOutSine', { update: () => setExt(s.v), done: () => { if (o.rearm) api.fired = false; } }));
+        },
+      });
+    };
+    if (o.zone) this.zone(o.zone[0], y, o.zone[1], o.zone[2], 3, o.zone[3], { repeat: true, enter: () => api.fire() });
+    return api;
   }
 
   // —— 时间工具 ——
