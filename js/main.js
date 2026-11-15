@@ -78,7 +78,7 @@ class Game {
 
     this.player = {
       pos: new THREE.Vector3(), vel: new THREE.Vector3(), yaw: 0, pitch: 0, roll: 0,
-      grounded: false, groundEnt: null, coyote: 0, carry: new THREE.Vector2(),
+      grounded: false, groundEnt: null, coyote: 0, carry: new THREE.Vector2(), push: new THREE.Vector3(),
       bob: 0, land: 0, stepDist: 0, steps: 0,
     };
     this.pmin = new THREE.Vector3(); this.pmax = new THREE.Vector3();
@@ -101,6 +101,7 @@ class Game {
     this.levelTime = 0;
     this.runTime = 0;
     this.levelDeaths = 0;
+    this.memory = new Set();
     this.shakeAmt = 0;
     this.fallMsg = { msg: FALL_LINES[0], set: null };
     this.menuSkin = Math.max(0, SKINS.findIndex((s) => s.id === this.save.skin));
@@ -158,16 +159,17 @@ class Game {
       this.menuSkin = idx;
       this.setSkin(SKINS[idx]);
     }
+    if (!respawn) { this.levelTime = 0; this.levelDeaths = 0; this.memory = new Set(); }
     this.loadWorld((L) => def.build(L), THEMES[def.theme]);
     const p = this.player, L = this.level;
-    p.pos.copy(L.spawnPos); p.vel.set(0, 0, 0); p.carry.set(0, 0);
+    p.pos.copy(L.spawnPos); p.vel.set(0, 0, 0); p.carry.set(0, 0); p.push.set(0, 0, 0);
     p.yaw = L.spawnYaw; p.pitch = -0.06; p.roll = 0;
     p.grounded = false; p.groundEnt = null; p.coyote = 0; p.land = 0;
     this.fallMsg = { msg: FALL_LINES[Math.floor(Math.random() * FALL_LINES.length)], set: null };
     this.setMirror(false);
     this.fakeDeathOn = false; this.fakeWinWait = false;
     this.input.reset();
-    if (!respawn) { this.levelTime = 0; this.levelDeaths = 0; this.showLevelCard(i); }
+    if (!respawn) this.showLevelCard(i);
     this.state = 'play';
     this.camMode = 'fp';
     this.camera.clearViewOffset();
@@ -204,6 +206,12 @@ class Game {
     this.persist();
   }
   shake(a) { this.shakeAmt = Math.max(this.shakeAmt, a); }
+  // 把玩家击飞（拳击手套、爆炸金币等）
+  impulse(x, y, z) {
+    const P = this.player;
+    P.push.x += x; P.push.z += z;
+    if (y) { P.vel.y = Math.max(P.vel.y, y); P.grounded = false; P.coyote = 0; P.groundEnt = null; }
+  }
   lookingAt(x, y, z, cosTh) {
     const c = this.camera.position;
     const d = this._v.set(x - c.x, y - c.y, z - c.z).normalize();
@@ -489,8 +497,15 @@ class Game {
           if (!this._anySolid()) continue;
           p.y = oy;
         }
+        // 推箱子：箱子挪动 65%，玩家贴着箱子跟上（速度不清零，推起来才顺）
+        if (e.pushable && P.grounded && this.level.tryMoveEnt(e, axis, d * 0.65)) {
+          this._pbox();
+          if (overlap(this.pmin, this.pmax, e.min, e.max)) { p[axis] = d > 0 ? e.min[axis] - R - 1e-4 : e.max[axis] + R + 1e-4; this._pbox(); }
+          continue;
+        }
         p[axis] = d > 0 ? e.min[axis] - R - 1e-4 : e.max[axis] + R + 1e-4;
         P.vel[axis] = 0;
+        P.push[axis] = 0;
         hit = e;
       }
       this._pbox();
@@ -549,8 +564,8 @@ class Game {
     let ground = null;
     for (let i = 0; i < n; i++) {
       P.vel.y = Math.max(-40, P.vel.y - GRAV * h);
-      this.moveAxis('x', (P.vel.x + P.carry.x) * h);
-      this.moveAxis('z', (P.vel.z + P.carry.y) * h);
+      this.moveAxis('x', (P.vel.x + P.carry.x + P.push.x) * h);
+      this.moveAxis('z', (P.vel.z + P.carry.y + P.push.z) * h);
       const dy = P.vel.y * h;
       const hit = this.moveAxis('y', dy);
       ground = hit && dy < 0 ? hit : null;
@@ -563,6 +578,8 @@ class Game {
       if (ground.onStep && this.state === 'play') ground.onStep(ground);
     }
     if (P.grounded && !ground.conveyor) P.carry.set(0, 0);
+    const pd = Math.exp(-dt * (P.grounded ? 4 : 0.5));
+    P.push.x *= pd; P.push.z *= pd;
 
     // 脚步 & 晃动
     const sp = Math.hypot(P.vel.x, P.vel.z);
