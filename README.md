@@ -5,6 +5,8 @@
 
 <p align="center"><img src="icon.png" width="160" alt="团子猫"></p>
 
+**▶ 在线游玩：https://deepshawn.github.io/Unreachable/**
+
 ## 怎么运行
 
 游戏是纯静态网页（Three.js 已放在 `vendor/` 里，不依赖 CDN），用任意静态服务器打开即可：
@@ -18,6 +20,14 @@ python3 -m http.server 8000
 > 部署到 GitHub Pages / Netlify / Vercel 等静态托管也可以直接用。
 
 **iPhone / iPad：** 用 Safari 打开网址 → 分享 → “添加到主屏幕”，就能像 App 一样全屏玩。横屏、竖屏都支持。
+
+## 更新线上版本
+
+GitHub Pages 发布的是 `gh-pages` 分支。改完代码后：
+
+```bash
+git checkout gh-pages && git merge <你的开发分支> && git push && git checkout -
+```
 
 ## 操作
 
