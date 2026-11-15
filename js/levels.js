@@ -658,7 +658,7 @@ export const LEVELS = [
             L.g.fx.emit(star.position, { count: 18, colors: ['#fff0a0', '#ffffff', '#ffb3d0'], speed: 4 });
             L.sfx.pop();
             const q = L.p.pos;
-            if (Math.hypot(q.x - tx, q.z - tz) < 0.95 && Math.abs(q.y - 6) < 1.2) L.kill('被流星砸中了 ☆彡 牌子说的是真的', '路牌都在骗人', 'squash');
+            if (rainOn && Math.hypot(q.x - tx, q.z - tz) < 0.95 && Math.abs(q.y - 6) < 1.2) L.kill('被流星砸中了 ☆彡 牌子说的是真的', '路牌都在骗人', 'squash');
           },
         });
       });
