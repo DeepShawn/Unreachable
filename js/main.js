@@ -71,7 +71,8 @@ class Game {
     this.input.onKeyAction = (code) => this.onKey(code);
     this.input.onLockChange = (locked) => {
       $('#lockHint').hidden = locked || this.state !== 'play' || this.input.isTouch;
-      if (!locked && this.state === 'play' && this._wasLocked) this.pause();
+      const fsJustToggled = performance.now() - (this._fsToggleAt || -1e9) < 1500;
+      if (!locked && this.state === 'play' && this._wasLocked && !fsJustToggled) this.pause();
       this._wasLocked = locked;
     };
 
@@ -342,6 +343,42 @@ class Game {
     if (!silent) this.toast('你真的相信自己死了呀～');
   }
 
+  // —————————— 全屏 ——————————
+  fsSupported() {
+    const d = document.documentElement;
+    return !!(d.requestFullscreen || d.webkitRequestFullscreen) && document.fullscreenEnabled !== false && document.webkitFullscreenEnabled !== false;
+  }
+  isFullscreen() { return !!(document.fullscreenElement || document.webkitFullscreenElement); }
+  isStandalone() { return navigator.standalone === true || matchMedia('(display-mode: standalone), (display-mode: fullscreen)').matches; }
+  toggleFullscreen() {
+    if (!this.fsSupported()) {
+      const ios = /iPhone|iPod/.test(navigator.userAgent) || (/Mac/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+      this.toast(ios ? '在 Safari 点「分享 → 添加到主屏幕」，从主屏幕打开就是全屏啦' : '这个浏览器不让网页全屏 (｡•́︿•̀｡)', 3.5);
+      return;
+    }
+    this._fsToggleAt = performance.now();
+    try {
+      if (this.isFullscreen()) {
+        const p = (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+        p && p.catch && p.catch(() => {});
+      } else {
+        const el = document.documentElement;
+        const p = el.requestFullscreen ? el.requestFullscreen({ navigationUI: 'hide' }) : el.webkitRequestFullscreen();
+        p && p.catch && p.catch(() => this.toast('全屏被浏览器拒绝了，再点一次试试'));
+      }
+    } catch (_) { this.toast('全屏被浏览器拒绝了，再点一次试试'); }
+  }
+  onFullscreenChange() {
+    const on = this.isFullscreen();
+    document.querySelectorAll('.fs-toggle').forEach((b) => {
+      b.classList.toggle('on', on);
+      if (b.classList.contains('icon-btn')) b.setAttribute('aria-label', on ? '退出全屏' : '全屏');
+    });
+    this.resize();
+    // 全屏后浏览器可能会放掉鼠标锁定，游戏中自动重新锁上
+    if (this.state === 'play') this.requestLock();
+  }
+
   pause() {
     if (this.state !== 'play') return;
     this.state = 'pause';
@@ -357,6 +394,7 @@ class Game {
   }
 
   onKey(code) {
+    if (code === 'KeyF' && this.state !== 'loading') { this.toggleFullscreen(); return; }
     if (code === 'Escape' || code === 'KeyP') {
       if (this.state === 'play') this.pause();
       else if (this.state === 'pause' && code === 'KeyP') this.resume();
@@ -686,6 +724,11 @@ class Game {
     click('#btnRestart', () => { this.startLevel(this.levelIdx); this.requestLock(); });
     click('#btnMenu', () => this.showMenu());
     click('#pauseBtn', () => this.pause());
+    ['#fsBtn', '#menuFs', '#pauseFs'].forEach((s) => click(s, () => this.toggleFullscreen()));
+    document.addEventListener('fullscreenchange', () => this.onFullscreenChange());
+    document.addEventListener('webkitfullscreenchange', () => this.onFullscreenChange());
+    // 已经从主屏幕以 App 方式打开时，本来就是全屏，不需要按钮
+    if (this.isStandalone()) document.querySelectorAll('.fs-toggle').forEach((b) => { b.hidden = true; });
     click('#btnRetry', () => {
       if (this.state === 'dead') this.respawn();
       else if (this.fakeDeathOn) { this.endFakeDeath(); this.troll('死亡画面是真的'); this.startLevel(this.levelIdx, true); }
